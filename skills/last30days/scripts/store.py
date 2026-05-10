@@ -159,7 +159,30 @@ _UPDATABLE_FINDING_COLUMNS = frozenset({
 })
 
 # Future migrations keyed by version number
-MIGRATIONS: Dict[int, str] = {}
+MIGRATIONS: Dict[int, str] = {
+    2: """
+CREATE TABLE IF NOT EXISTS finding_sightings (
+    id INTEGER PRIMARY KEY,
+    finding_id INTEGER REFERENCES findings(id) ON DELETE CASCADE,
+    run_id INTEGER REFERENCES research_runs(id) ON DELETE CASCADE,
+    topic_id INTEGER REFERENCES topics(id) ON DELETE CASCADE,
+    source TEXT NOT NULL,
+    source_url TEXT NOT NULL,
+    source_title TEXT,
+    engagement_score REAL,
+    relevance_score REAL,
+    seen_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(run_id, finding_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_finding_sightings_run
+    ON finding_sightings(run_id, topic_id);
+CREATE INDEX IF NOT EXISTS idx_finding_sightings_topic_seen
+    ON finding_sightings(topic_id, seen_at);
+CREATE INDEX IF NOT EXISTS idx_finding_sightings_url
+    ON finding_sightings(source_url);
+""",
+}
 
 
 def _connect(db_path: Optional[Path] = None) -> sqlite3.Connection:
@@ -423,6 +446,7 @@ def store_findings(
 
         new_count = len(insert_rows)
         updated_count = len(update_rows)
+        _record_sightings(conn, run_id, topic_id, with_urls)
         conn.execute(
             "UPDATE research_runs SET findings_new = ?, findings_updated = ? WHERE id = ?",
             (new_count, updated_count, run_id),
@@ -432,6 +456,68 @@ def store_findings(
         conn.close()
 
     return {"new": new_count, "updated": updated_count}
+
+
+def _record_sightings(
+    conn: sqlite3.Connection,
+    run_id: int,
+    topic_id: int,
+    findings_with_urls: List[tuple[str, Dict[str, Any]]],
+) -> None:
+    """Record the findings observed during this run.
+
+    The aggregate findings table keeps one row per URL and updates that row on
+    re-sighting. This ledger preserves the run/topic membership needed for
+    watchlist deltas and dossiers.
+    """
+    if not findings_with_urls:
+        return
+
+    by_url = {url: finding for url, finding in findings_with_urls}
+    placeholders = ",".join("?" for _ in by_url)
+    rows = conn.execute(
+        f"SELECT id, source_url FROM findings WHERE source_url IN ({placeholders})",
+        list(by_url),
+    ).fetchall()
+    sighting_rows = []
+    for row in rows:
+        finding = by_url[row["source_url"]]
+        sighting_rows.append((
+            row["id"],
+            run_id,
+            topic_id,
+            finding.get("source", "unknown"),
+            row["source_url"],
+            finding.get("source_title") or finding.get("title", ""),
+            finding.get("engagement_score", 0),
+            finding.get("relevance_score", 0),
+        ))
+
+    if not sighting_rows:
+        return
+
+    conn.executemany(
+        """INSERT OR IGNORE INTO finding_sightings
+           (finding_id, run_id, topic_id, source, source_url, source_title,
+            engagement_score, relevance_score)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        sighting_rows,
+    )
+
+
+def get_sightings_for_run(topic_id: int, run_id: int) -> List[Dict[str, Any]]:
+    """Return findings observed for a topic during a specific run."""
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            """SELECT * FROM finding_sightings
+               WHERE topic_id = ? AND run_id = ?
+               ORDER BY id""",
+            (topic_id, run_id),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
 
 
 def get_new_findings(
