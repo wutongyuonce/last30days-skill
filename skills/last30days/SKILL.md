@@ -1,6 +1,6 @@
 ---
 name: last30days
-version: "3.2.2"
+version: "3.2.3"
 description: "Research what people actually say about any topic in the last 30 days. Pulls posts and engagement from Reddit, X, YouTube, TikTok, Hacker News, Polymarket, GitHub, and the web."
 argument-hint: 'last30days nvidia earnings reaction | last30days AI video tools | last30days what users want in react'
 allowed-tools: Bash, Read, Write, AskUserQuestion, WebSearch
@@ -186,13 +186,13 @@ The self-evolving loop is the sticky use case. Every 15 tool calls Hermes pauses
 Cron-scheduled autonomous briefings are the most-cited concrete workflow. r/TunisiaTech's "Use cases of OpenClaw, Hermes Agent" thread says it plainly: "Currently I have daily cron jobs for news briefing, but I know there's much more I can do."
 ```
 
-**LAW 7 - YOU ARE THE PLANNER. `--plan` IS MANDATORY ON NAMED-ENTITY TOPICS.** If you are the reasoning model hosting this skill (Claude Code, Codex, Hermes, Gemini, or any agent runtime that invoked `/last30days`), YOU generate the JSON query plan. You do not need an API key, "LLM provider" credentials, or an external planning service - you ARE the LLM. The `--plan` flag exists precisely so a reasoning model generates its own plan upstream and passes it to the engine. The engine's internal planner and deterministic fallback are headless/cron paths only; on any reasoning-model path, bypass them by passing `--plan '$JSON'`.
+**LAW 7 - YOU ARE THE PLANNER. `--plan` IS MANDATORY ON NAMED-ENTITY TOPICS.** If you are the reasoning model hosting this skill (Claude Code, Codex, Hermes, Gemini, or any agent runtime that invoked `/last30days`), YOU generate the JSON query plan. You do not need an API key, "LLM provider" credentials, or an external planning service - you ARE the LLM. The `--plan` flag exists precisely so a reasoning model generates its own plan upstream and passes it to the engine. The engine's internal planner and deterministic fallback are headless/cron paths only; on any reasoning-model path, bypass them by passing `--plan "$QUERY_PLAN_FILE"` (the path to a tmpfile you wrote via heredoc — see Step 1 for the pattern; never inline `--plan '$JSON'`, apostrophes in search/ranking strings break shell parsing).
 
-Named-entity topics (capitalized proper nouns, product names, person names, project names, or any topic that would benefit from handle resolution in Step 0.55) REQUIRE `--plan`. Your invocation of `scripts/last30days.py` MUST contain `--plan '$JSON'`. A bare `python3 scripts/last30days.py "$TOPIC" --emit=compact` on a named-entity topic is a LAW 7 violation. Before you invoke Bash, self-check: does my command contain `--plan`? If no, STOP and generate a plan first (see Step 0.75 for the schema).
+Named-entity topics (capitalized proper nouns, product names, person names, project names, or any topic that would benefit from handle resolution in Step 0.55) REQUIRE `--plan`. Your invocation of `scripts/last30days.py` MUST contain `--plan "$QUERY_PLAN_FILE"` (or any path the engine can read). A bare `python3 scripts/last30days.py "$TOPIC" --emit=compact` on a named-entity topic is a LAW 7 violation. Before you invoke Bash, self-check: does my command contain `--plan`? If no, STOP and generate a plan first (see Step 0.75 for the schema).
 
 **Observed LAW 7 violation (2026-04-19, Hermes Agent Use Cases Run 1):** the model called the engine bare with no `--plan`, no pre-flight handle resolution. The engine emitted a stderr warning ("No --plan and no LLM provider configured. Using deterministic fallback...") which the model read as a capability constraint ("I don't have a key, I can't do LLM stuff") instead of as what it actually was: a reminder that the reasoning model skipped its own planning step. The misread came from the word "provider" - the engine uses "provider" to mean "the key for the engine's INTERNAL planner," but the model parsed it as "I need a provider to plan at all." You do not. You ARE the provider. Run 2 of the same topic (2026-04-19, framed as "best workflows") with the same model and same cache generated the plan itself via `--plan` and produced clean results - the delta was this step.
 
-**Self-check before Bash:** re-read your pending `scripts/last30days.py` command. Does it contain `--plan '$JSON'`? If no, and the topic is a named entity, STOP. Return to Step 0.75 and generate the plan. Do not interpret the word "provider" in any engine message as "you need credentials" - you are the provider.
+**Self-check before Bash:** re-read your pending `scripts/last30days.py` command. Does it contain `--plan "$QUERY_PLAN_FILE"` (or another path the engine can read)? If no, and the topic is a named entity, STOP. Return to Step 0.75 and generate the plan, then write it to a tmpfile per the Step 1 pattern. Do not interpret the word "provider" in any engine message as "you need credentials" - you are the provider.
 
 **LAW 8 - EVERY CITATION IN THE NARRATIVE IS AN INLINE MARKDOWN LINK `[name](url)`. NEVER A RAW URL STRING. NEVER A PLAIN NAME WHEN A URL IS AVAILABLE.** Applies to every query type. In the "What I learned:" narrative, in KEY PATTERNS, and in the COMPARISON body sections, every cited @handle, r/subreddit, publication, YouTube channel, TikTok creator, Instagram creator, and Polymarket market is wrapped as `[name](url)` at first mention. The URL comes from the raw research dump — every engine item carries a URL; WebSearch supplements carry URLs in their own output. Claude Code renders `[text](url)` as blue CMD-clickable text; the URL is hidden in the rendering, only the link text shows. The stats footer (emoji-tree block) is engine-emitted per LAW 5 and passes through verbatim — do NOT reformat its links yourself.
 
@@ -243,7 +243,7 @@ If your Bash call to `last30days.py` does NOT include the FULL pre-flight checkl
 
 ---
 
-# last30days v3.2.2: Research Any Topic from the Last 30 Days
+# last30days v3.2.3: Research Any Topic from the Last 30 Days
 
 > **Permissions overview:** Reads public web/platform data and optionally saves research briefings to `LAST30DAYS_MEMORY_DIR` (defaults to `~/Documents/Last30Days`). X/Twitter search uses optional user-provided tokens (AUTH_TOKEN/CT0 env vars). Bluesky search uses optional app password (BSKY_HANDLE/BSKY_APP_PASSWORD env vars - create at bsky.app/settings/app-passwords). All credential usage and data writes are documented in the [Security & Permissions](#security--permissions) section.
 
@@ -615,17 +615,30 @@ if [ -z "$SKILL_ROOT" ] || [ ! -f "$SKILL_ROOT/scripts/last30days.py" ]; then
   done
 fi
 
+# Write the per-entity plan to a tmpfile and pass the path to the engine.
+# The engine's parse_competitors_plan() reads file paths transparently. This
+# avoids the inline-single-quoted-JSON apostrophe trap (resolved context
+# strings like "people's choice" or "McDonald's" otherwise close the outer
+# single-quote and break shell parsing before the engine is even invoked).
+COMPETITORS_PLAN_FILE=$(mktemp -t last30days-competitors.XXXXXX.json)
+trap 'rm -f "$COMPETITORS_PLAN_FILE"' EXIT
+cat > "$COMPETITORS_PLAN_FILE" <<'PLAN_EOF'
+{
+  "{TOPIC_B}": {"x_handle":"{TOPIC_B_HANDLE}","subreddits":["{TOPIC_B_SUB_1}","{TOPIC_B_SUB_2}"],"github_user":"{TOPIC_B_GH}","context":"{TOPIC_B_CONTEXT}"},
+  "{TOPIC_C}": {"x_handle":"{TOPIC_C_HANDLE}","subreddits":["{TOPIC_C_SUB_1}"],"github_user":"{TOPIC_C_GH}","context":"{TOPIC_C_CONTEXT}"}
+}
+PLAN_EOF
+
 "${LAST30DAYS_PYTHON}" "${SKILL_ROOT}/scripts/last30days.py" "{TOPIC_A} vs {TOPIC_B} vs {TOPIC_C}" \
   --emit=compact \
   --save-dir="${LAST30DAYS_MEMORY_DIR}" \
   --save-suffix=v3 \
   --x-handle={TOPIC_A_HANDLE} \
   --subreddits={TOPIC_A_SUBS} \
-  --competitors-plan '{
-    "{TOPIC_B}": {"x_handle":"{TOPIC_B_HANDLE}","subreddits":["{TOPIC_B_SUB_1}","{TOPIC_B_SUB_2}"],"github_user":"{TOPIC_B_GH}","context":"{TOPIC_B_CONTEXT}"},
-    "{TOPIC_C}": {"x_handle":"{TOPIC_C_HANDLE}","subreddits":["{TOPIC_C_SUB_1}"],"github_user":"{TOPIC_C_GH}","context":"{TOPIC_C_CONTEXT}"}
-  }'
+  --competitors-plan "$COMPETITORS_PLAN_FILE"
 ```
+
+**The quoted heredoc marker `'PLAN_EOF'` is load-bearing** — quoting suppresses shell interpolation so apostrophes, `$`, backticks, etc. pass through verbatim. If you ever switch to an unquoted `<<PLAN_EOF`, every variable reference and apostrophe inside the JSON becomes a parse hazard.
 
 Topic A (the main topic, first in the vs-string) uses outer `--x-handle`, `--x-related`, `--subreddits`, `--github-user`, `--github-repo`, `--tiktok-*`, `--ig-creators` as usual. Topics B and C get their targeting from `--competitors-plan` entries (keyed by entity name, case-insensitive).
 
@@ -941,8 +954,23 @@ fi
 "${LAST30DAYS_PYTHON}" "${SKILL_ROOT}/scripts/last30days.py" $ARGUMENTS --emit=compact --save-dir="${LAST30DAYS_MEMORY_DIR}" --save-suffix=v3
 ```
 
-**If you ran Steps 0.55 and 0.75 (agent planning), add these flags:**
-- `--plan 'QUERY_PLAN_JSON'` (replace with actual JSON from Step 0.75)
+**If you ran Steps 0.55 and 0.75 (agent planning), pass the plan via a tmpfile and add the targeting flags:**
+
+```bash
+# Write QUERY_PLAN_JSON to a tmpfile before the engine invocation above.
+# parse_plan() reads file paths transparently; this avoids inline-JSON
+# shell-quoting hazards (apostrophes in search_query / ranking_query
+# strings break single-quoted command-line JSON).
+QUERY_PLAN_FILE=$(mktemp -t last30days-plan.XXXXXX.json)
+trap 'rm -f "$QUERY_PLAN_FILE"' EXIT
+cat > "$QUERY_PLAN_FILE" <<'PLAN_EOF'
+{QUERY_PLAN_JSON_FROM_STEP_0.75}
+PLAN_EOF
+```
+
+Then add to the engine command:
+
+- `--plan "$QUERY_PLAN_FILE"` (path to the file you just wrote)
 - `--x-handle={RESOLVED_HANDLE}` (from Step 0.5)
 - `--subreddits={RESOLVED_SUBREDDITS}` (from Step 0.55)
 - `--tiktok-hashtags={RESOLVED_HASHTAGS}` (from Step 0.55)
