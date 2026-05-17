@@ -352,6 +352,15 @@ def get_config() -> dict[str, Any]:
         if legacy:
             config['SCRAPECREATORS_API_KEY'] = legacy
 
+    # Multi-key rotation: comma-separated SCRAPECREATORS_API_KEY round-robins
+    # via random.choice per run. Originally added in #268, accidentally dropped
+    # in v3.0.6, restored here.
+    sc_key_raw = config.get('SCRAPECREATORS_API_KEY') or ''
+    if ',' in sc_key_raw:
+        import random
+        sc_keys = [k.strip() for k in sc_key_raw.split(',') if k.strip()]
+        config['SCRAPECREATORS_API_KEY'] = random.choice(sc_keys) if sc_keys else ''
+
     # Track which config source was used (highest-priority file source wins
     # the label; keychain is only reported when nothing else is configured).
     if project_env_path:
