@@ -49,6 +49,25 @@ def test_project_config_loads_with_global_trust_signal(tmp_path, monkeypatch):
     assert cfg["_CONFIG_SOURCE"].startswith(f"project:{project_env}")
 
 
+def test_empty_process_trust_signal_overrides_global_trust_signal(tmp_path, monkeypatch):
+    global_env = tmp_path / "global.env"
+    global_env.write_text("LAST30DAYS_TRUST_PROJECT_CONFIG=1\n", encoding="utf-8")
+    project_dir = tmp_path / "project"
+    project_env = project_dir / ".claude" / "last30days.env"
+    project_env.parent.mkdir(parents=True)
+    project_env.write_text("XAI_API_KEY=xai-project\n", encoding="utf-8")
+    monkeypatch.chdir(project_dir)
+    monkeypatch.setattr(env, "CONFIG_FILE", global_env)
+    monkeypatch.setenv("LAST30DAYS_TRUST_PROJECT_CONFIG", "")
+
+    keychain, pass_store = _neutral_secret_sources()
+    with keychain, pass_store:
+        cfg = env.get_config()
+
+    assert cfg["XAI_API_KEY"] is None
+    assert cfg["_CONFIG_SOURCE"].startswith(f"global:{global_env}")
+
+
 def test_project_config_discovery_stops_at_git_root(tmp_path, monkeypatch):
     outside_env = tmp_path / ".claude" / "last30days.env"
     outside_env.parent.mkdir()
@@ -88,11 +107,46 @@ def test_global_config_loads_when_project_config_is_untrusted(tmp_path, monkeypa
     assert cfg["_CONFIG_SOURCE"].startswith(f"global:{global_env}")
 
 
+def test_config_exists_ignores_untrusted_project_config(tmp_path, monkeypatch):
+    project_env = tmp_path / ".claude" / "last30days.env"
+    project_env.parent.mkdir()
+    project_env.write_text("XAI_API_KEY=xai-project\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(env, "CONFIG_FILE", None)
+    monkeypatch.delenv("LAST30DAYS_TRUST_PROJECT_CONFIG", raising=False)
+
+    assert env.config_exists() is False
+
+
+def test_config_exists_reports_trusted_project_config(tmp_path, monkeypatch):
+    project_env = tmp_path / ".claude" / "last30days.env"
+    project_env.parent.mkdir()
+    project_env.write_text("XAI_API_KEY=xai-project\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(env, "CONFIG_FILE", None)
+    monkeypatch.setenv("LAST30DAYS_TRUST_PROJECT_CONFIG", "1")
+
+    assert env.config_exists() is True
+
+
+def test_config_exists_reports_global_config(tmp_path, monkeypatch):
+    global_env = tmp_path / "global.env"
+    global_env.write_text("XAI_API_KEY=xai-global\n", encoding="utf-8")
+    monkeypatch.setattr(env, "CONFIG_FILE", global_env)
+    monkeypatch.delenv("LAST30DAYS_TRUST_PROJECT_CONFIG", raising=False)
+
+    assert env.config_exists() is True
+
+
 def test_diagnose_reports_ignored_untrusted_endpoint_override(tmp_path, monkeypatch):
     project_env = tmp_path / ".claude" / "last30days.env"
     project_env.parent.mkdir()
     project_env.write_text(
-        "OPENAI_BASE_URL=https://attacker.example\nOPENAI_API_KEY=sk-not-reported\n",
+        "BSKY_SEARCH_HOST=https://bsky-attacker.example\n"
+        "LAST30DAYS_SEARXNG_URL=https://searxng-attacker.example\n"
+        "OPENAI_BASE_URL=https://attacker.example\n"
+        "OPENAI_API_KEY=sk-not-reported\n"
+        "XIAOHONGSHU_API_BASE=https://xhs-attacker.example\n",
         encoding="utf-8",
     )
     monkeypatch.chdir(tmp_path)
@@ -110,5 +164,10 @@ def test_diagnose_reports_ignored_untrusted_endpoint_override(tmp_path, monkeypa
     assert cfg["OPENAI_API_KEY"] == "sk-global"
     assert cfg["OPENAI_BASE_URL"] is None
     assert diag["ignored_project_config"] == str(project_env)
-    assert diag["ignored_endpoint_overrides"] == ["OPENAI_BASE_URL"]
+    assert diag["ignored_endpoint_overrides"] == [
+        "BSKY_SEARCH_HOST",
+        "LAST30DAYS_SEARXNG_URL",
+        "OPENAI_BASE_URL",
+        "XIAOHONGSHU_API_BASE",
+    ]
     assert "sk-not-reported" not in str(diag)

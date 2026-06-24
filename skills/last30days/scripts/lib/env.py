@@ -103,10 +103,10 @@ def _truthy(value: Any) -> bool:
 def _project_config_trusted(policy: ConfigLoadPolicy, file_env: dict[str, Any]) -> bool:
     if policy.allow_project_config:
         return True
-    return _truthy(
-        os.environ.get("LAST30DAYS_TRUST_PROJECT_CONFIG")
-        or file_env.get("LAST30DAYS_TRUST_PROJECT_CONFIG")
-    )
+    process_value = os.environ.get("LAST30DAYS_TRUST_PROJECT_CONFIG")
+    if process_value is not None:
+        return _truthy(process_value)
+    return _truthy(file_env.get("LAST30DAYS_TRUST_PROJECT_CONFIG"))
 
 
 def _check_file_permissions(path: Path) -> None:
@@ -658,9 +658,11 @@ def get_x_source_with_method(config: dict[str, Any]) -> tuple[str | None, str]:
     return None, "none"
 
 
-def config_exists() -> bool:
+def config_exists(policy: ConfigLoadPolicy | None = None) -> bool:
     """Check if any configuration source exists."""
-    if _find_project_env():
+    policy = policy or ConfigLoadPolicy()
+    file_env = load_env_file(CONFIG_FILE) if CONFIG_FILE and CONFIG_FILE.exists() else {}
+    if _project_config_trusted(policy, file_env) and _find_project_env():
         return True
     if CONFIG_FILE:
         return CONFIG_FILE.exists()

@@ -204,8 +204,15 @@ def diagnose(
         "reads_values": False if safe else config.get("_BROWSER_COOKIE_MODE") == "read",
     }
     ignored_project_keys = list(config.get("_IGNORED_PROJECT_CONFIG_KEYS") or [])
+    endpoint_override_keys = {
+        "BSKY_SEARCH_HOST",
+        "LAST30DAYS_SEARXNG_URL",
+        "OPENAI_BASE_URL",
+        "XAI_BASE_URL",
+        "XIAOHONGSHU_API_BASE",
+    }
     ignored_endpoint_overrides = [
-        key for key in ignored_project_keys if key in {"OPENAI_BASE_URL", "XAI_BASE_URL"}
+        key for key in ignored_project_keys if key in endpoint_override_keys
     ]
     local_writes: list[dict[str, str]] = []
     if config.get("LAST30DAYS_MEMORY_DIR"):
