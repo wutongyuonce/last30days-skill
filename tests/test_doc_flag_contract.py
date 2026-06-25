@@ -41,3 +41,17 @@ def test_agent_is_documented_as_skill_argument_not_python_flag():
     agent_section = text[start:start + 2000]
     assert "If `--agent` appears in ARGUMENTS" in agent_section
     assert "Skill tool" in text
+
+
+def test_comparison_artifact_contract_documents_actual_paths():
+    text = SKILL_MD.read_text(encoding="utf-8")
+    comparison_start = text.index("\n## If QUERY_TYPE = COMPARISON\n")
+    comparison_section = text[comparison_start:comparison_start + 5000]
+    assert "there is no separate merged Markdown raw file" in comparison_section
+    assert "[last30days] Comparison artifact set: main={path}; peers={path, ...}" in comparison_section
+    assert "Treat that log line as authoritative" in comparison_section
+
+    step_start = text.index("## Step 2.5: Append WebSearch Results to Saved Raw File")
+    step_section = text[step_start:step_start + 3500]
+    assert "append the same `## WebSearch Supplemental Results` section to every listed per-entity Markdown raw file" in step_section
+    assert "do not append Markdown text to `.html` or `.json`" in step_section

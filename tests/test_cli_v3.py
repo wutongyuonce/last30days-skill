@@ -473,6 +473,10 @@ class CliV3Tests(unittest.TestCase):
             )
             self.assertIn(f"[last30days] Saved output to {output_path.resolve()}", stderr.getvalue())
             self.assertIn(f"[last30days] Saved output to {comparison_saved.resolve()}", stderr.getvalue())
+            self.assertIn(
+                f"[last30days] Comparison artifact set: main={comparison_saved.resolve()};",
+                stderr.getvalue(),
+            )
 
     def test_main_canonicalizes_explicit_github_repo_flags(self):
         report = self.make_report()

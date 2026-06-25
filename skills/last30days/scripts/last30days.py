@@ -1212,6 +1212,7 @@ def main() -> int:
             rendered_content=rendered if is_comparison_html else None,
         )
         sys.stderr.write(f"[last30days] Saved output to {save_path}\n")
+        comparison_peer_paths: list[Path] = []
         # Competitor / vs-mode: also save a per-entity raw file for each peer.
         # Matches historical vs-mode behavior (N passes → N save files).
         if entity_reports and len(entity_reports) > 1:
@@ -1221,7 +1222,13 @@ def main() -> int:
                     suffix=args.save_suffix or "",
                     synthesis_md=synthesis_md,
                 )
+                comparison_peer_paths.append(peer_path)
                 sys.stderr.write(f"[last30days] Saved output to {peer_path}\n")
+            peers_display = ", ".join(str(path) for path in comparison_peer_paths)
+            sys.stderr.write(
+                f"[last30days] Comparison artifact set: main={save_path}; "
+                f"peers={peers_display}\n"
+            )
         sys.stderr.flush()
     print(rendered)
     return 0
