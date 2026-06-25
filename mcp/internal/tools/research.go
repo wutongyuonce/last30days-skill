@@ -1,7 +1,4 @@
-// Package tools owns the MCP tool surface for last30days. Today there is
-// exactly one tool, research, mirroring the /last30days <topic> slash
-// command available in Claude Code. Adding new tools means another file
-// here plus an additional s.AddTool call in Register.
+// Package tools owns the MCP tool surface for last30days.
 package tools
 
 import (
@@ -26,6 +23,7 @@ type Config struct {
 // Register adds every tool this server exposes to s. The caller supplies a
 // Config so test harnesses can pin a version without touching globals.
 func Register(s *server.MCPServer, cfg Config) {
+	registerPreflightTool(s, cfg)
 	s.AddTool(
 		mcplib.NewTool("research",
 			mcplib.WithDescription(
@@ -91,13 +89,17 @@ func makeResearchHandler(cfg Config) server.ToolHandlerFunc {
 func researchRunArgs(topic, emit string, save bool) []string {
 	runArgs := []string{topic, "--emit=" + emit, "--no-browser-cookies"}
 	if save {
-		saveDir := os.Getenv("LAST30DAYS_MEMORY_DIR")
-		if saveDir == "" {
-			saveDir = "~/Documents/Last30Days"
-		}
-		runArgs = append(runArgs, "--save-dir", saveDir)
+		runArgs = append(runArgs, "--save-dir", mcpSaveDir())
 	}
 	return runArgs
+}
+
+func mcpSaveDir() string {
+	saveDir := os.Getenv("LAST30DAYS_MEMORY_DIR")
+	if saveDir == "" {
+		return "~/Documents/Last30Days"
+	}
+	return saveDir
 }
 
 func requireString(args map[string]any, name string) (string, error) {

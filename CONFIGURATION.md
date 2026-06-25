@@ -47,8 +47,11 @@ The engine's `.env` reader doesn't expand `$HOME` — only the tilde, via `Path(
 - `--no-browser-cookies` - hard-disable browser-cookie extraction for this run, even when `FROM_BROWSER` is configured. MCP and folder-mode hosts use this for safe defaults.
 - `--publish-html` - with `--emit=html`, publish the rendered HTML to `ht-ml.app` after local output/save-dir writes. This is explicit opt-in only; pages are public by default.
 - `--publish-password <password>` - optional shared password for `--publish-html`. Prefer `LAST30DAYS_PUBLISH_PASSWORD=<password>` instead so the password is not visible in the process list or shell history. Use a unique non-personal password; never reuse the user's own password. The provider's update key is treated as secret and is not written to stdout, HTML, raw output, or `.publish.json` metadata.
+- `--preflight` - print a human-readable permission preflight. It reports config source, project config trust/ignore state, browser-cookie plan, planned writes, optional commands, source availability, and endpoint overrides without reading browser cookies, writing setup/config/report files, or running research. Add `--emit=json` for machine-readable preflight JSON; use `--diagnose` when you need the full source diagnostic JSON.
 
 The footer line `📎 Raw results saved to ${LAST30DAYS_MEMORY_DIR:-$HOME/Documents/Last30Days}/<slug>-raw.md` is the canonical pointer; if it shows backslashes on Windows update past v3.1.1.
+
+HTML follow-up renders also write a structured `last-report.json` cache beside `last-run.json` so `--emit=html --synthesis-file` can reuse the report metadata/footer without fetching sources again. Reuse is intentionally short-lived: `LAST30DAYS_REPORT_CACHE_TTL_SECONDS` defaults to `3600` (one hour). Set it to another integer number of seconds to tune the window, or `0` to disable report-cache reuse.
 
 ---
 
@@ -84,7 +87,7 @@ The project-scoped file is useful for **intentional per-client setups**: drop a 
 
 | Source | Key(s) | Required for | Free tier |
 |---|---|---|---|
-| Reddit (public) | none | always on | yes |
+| Reddit (public) | none (default); `SCRAPECREATORS_API_KEY` + `LAST30DAYS_REDDIT_BACKEND=scrapecreators` to pin SC primary with public fallback | always on; SC pin requires `SCRAPECREATORS_API_KEY` | yes |
 | Hacker News | none | always on | yes |
 | Polymarket | none | always on | yes |
 | GitHub | `gh` CLI installed (uses your GitHub auth) | always on if `gh` present | yes |
@@ -146,7 +149,7 @@ BSKY_APP_PASSWORD=<your-app-password>
 
 After editing: `chmod 600 ~/.config/last30days/.env` (or `chmod 600 .claude/last30days.env` if using the project-scoped variant).
 
-**Troubleshooting:** if a source you expected to see isn't appearing in results, run `python3 scripts/last30days.py --diagnose`. It prints a safe preflight report for source availability, config source, browser-cookie plan, external command availability, write destinations, and ignored untrusted project config without reading browser cookies or running live provider probes.
+**Troubleshooting:** if a source you expected to see isn't appearing in results, run `python3 scripts/last30days.py --preflight` for a human permission summary or `python3 scripts/last30days.py --diagnose` for full JSON diagnostics. Both are safe: they report source availability, config source, browser-cookie plan, external command availability, write destinations, and ignored untrusted project config without reading browser cookies or running live provider probes.
 
 ### Perplexity source modes
 
@@ -188,6 +191,13 @@ to disk, never logged). Both are **lowest-priority and additive** — an explici
 sources, so a box that merely has `pass` installed pays no decrypt cost when
 everything is already in `.env`.
 
+Effective credential priority is: process env > trusted project config
+(`.claude/last30days.env`) > global config (`~/.config/last30days/.env`) >
+macOS Keychain > `pass`(1). The SessionStart status hook also checks for
+Keychain item **presence** under `last30days-<KEY>` without reading secret
+values, so a Keychain-only setup is treated as configured instead of showing the
+first-run welcome again.
+
 | Platform | Source | Store keys with | Lookup convention |
 |---|---|---|---|
 | macOS | Keychain | `scripts/setup-keychain.sh` | service name `last30days-<KEY>` |
@@ -212,6 +222,35 @@ export LAST30DAYS_PASS_PREFIX="secrets/last30days/"   # default: last30days/
 ```
 
 Both sources cover the same key set as the `.env` skeleton above.
+
+#### Reusing existing macOS Keychain items
+
+If you already have keys stored under another Keychain naming convention, you
+can reference them without copying the secret by setting non-secret alias
+metadata in `LAST30DAYS_KEYCHAIN_ALIASES`. The loader still checks
+`last30days-<KEY>` first; aliases are fallback lookups only.
+
+```bash
+# ~/.config/last30days/.env
+LAST30DAYS_KEYCHAIN_ALIASES={"XAI_API_KEY":{"account":"keychain-user","service":"existing-xai-api-key"},"BRAVE_API_KEY":"existing-brave-api-key"}
+```
+
+Each JSON key must be one of the supported env-var names (`XAI_API_KEY`,
+`SCRAPECREATORS_API_KEY`, `BRAVE_API_KEY`, etc). A string value means "use this
+service name with the current user account"; an object can specify both
+`account` and `service`. Lists are allowed for fallback order:
+
+```bash
+LAST30DAYS_KEYCHAIN_ALIASES={"XAI_API_KEY":[{"account":"keychain-user","service":"existing-xai-api-key"},{"service":"last-resort-xai"}]}
+```
+
+The alias value contains no secret material; it is safe to keep in `.env` as
+configuration. The secret itself remains in its original Keychain item and is
+read directly by the engine process.
+
+Write `LAST30DAYS_KEYCHAIN_ALIASES` as a single-line JSON value in `.env`.
+Multiline JSON formatting is not supported because `.env` files are parsed
+line-by-line.
 
 ### Bluesky app-password format and search host
 
@@ -253,15 +292,15 @@ When you invoke `/last30days` from Claude Code, Codex, or Gemini, the host model
 
 The search-source preference ladder, strict best-to-floor:
 
-1. **Host-native search** - Claude Code's `WebSearch`, and the equivalents on Codex / Gemini. Best results; used automatically on hosts that have it. Signalled to the engine via `LAST30DAYS_NATIVE_SEARCH=1` (the skill sets this for you when your host has a native search tool) so the engine does not run a worse search underneath it.
+1. **Host web search** - whatever web-search capability the agent session already has: built-in search, a deferred web-search tool that must be loaded first, or an installed connector such as Brave, Firecrawl, Exa, Serper, or another provider. Best results; used automatically on hosts that have it. A failed lookup for one specific tool name is not fatal when another web-search capability is available. Signalled to the engine via `LAST30DAYS_NATIVE_SEARCH=1` (the skill sets this for you when your agent session has web search) so the engine does not run a worse search underneath it.
 2. **Paid engine backend** - one of `BRAVE_API_KEY`, `EXA_API_KEY`, `SERPER_API_KEY`, `PARALLEL_API_KEY`, auto-detected in that order. Override per-run with `--web-backend=<name>`.
-3. **Keyless engine floor** - zero-key web search (DuckDuckGo, plus an optional SearXNG instance) and zero-key page fetch (Jina Reader). Runs only when the host has **no** native search **and** no paid key is set, so headless/cron and hosts without a built-in search tool still get general-web coverage. Force it explicitly with `--web-backend=keyless`.
+3. **Keyless engine floor** - zero-key web search (DuckDuckGo, plus an optional SearXNG instance) and zero-key page fetch (Jina Reader). Runs only when the agent session has **no** host web search **and** no paid key is set, so headless/cron and hosts without a search tool still get general-web coverage. Force it explicitly with `--web-backend=keyless`.
 
 Relevant env vars:
 
 | Var | Effect |
 | --- | --- |
-| `LAST30DAYS_NATIVE_SEARCH=1` | Tells the engine your host has native search; suppresses the keyless floor. Set automatically by the skill on capable hosts. Leave unset on hosts without a native search tool so the floor runs. |
+| `LAST30DAYS_NATIVE_SEARCH=1` | Tells the engine your agent session has host-side web search; suppresses the keyless floor. Set automatically by the skill when web search is available. Leave unset when the agent has no web-search tool so the floor runs. |
 | `LAST30DAYS_SEARXNG_URL=<base-url>` | Optional. A SearXNG instance used as the keyless-search fallback rung when DuckDuckGo returns nothing. |
 
 Privacy note: the keyless floor sends the query (to DuckDuckGo / your SearXNG instance) and any fetched URL (to Jina Reader) to those third parties. It is intended for public-research use; results may be cached snapshots. It never runs when native search or a paid backend is in play.

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Advisory Semgrep SAST scan runs on every push/PR as part of the Security workflow, catching source-level security bugs using Semgrep CE community rules ([#563](https://github.com/mvanhorn/last30days-skill/issues/563))
+- Scheduled OSV-Scanner vulnerability-drift workflow scans repository lockfiles weekly and uploads SARIF results to GitHub code scanning, catching newly disclosed CVEs in the dependency tree even between PRs ([#571](https://github.com/mvanhorn/last30days-skill/issues/571))
+- `LAST30DAYS_REDDIT_BACKEND=scrapecreators` makes ScrapeCreators the primary Reddit backend with the public path as fallback. Users with a ScrapeCreators key who were getting shallow public data will now get full nested comment trees by setting this flag ([#589](https://github.com/mvanhorn/last30days-skill/issues/589))
+- MCP Go tests (`mcp/`) now run in CI on every push/PR alongside the Python test suite, so MCP server regressions are caught before merge ([#621](https://github.com/mvanhorn/last30days-skill/issues/621))
+
+### Fixed
+
+- Firefox profile detection on Linux now checks `$XDG_CONFIG_HOME/mozilla/firefox` (or its default `~/.config/mozilla/firefox`) in addition to `~/.mozilla/firefox`, fixing cookie extraction on distros that honour the XDG Base Directory Specification ([#667](https://github.com/mvanhorn/last30days-skill/issues/667))
+
 ## [3.8.1] - 2026-06-22
 
 ### Added
@@ -63,6 +74,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - The X FROM lane (the subject's own timeline) now pulls up to 8 posts per handle (was 3); the about/related lanes stay modest.
+
+### Fixed
+
+- Secrets `.env` and its parent config directory are now auto-tightened to `0o600`/`0o700` after creation, and `check-config.sh`'s `check_perms` now auto-fixes loose permissions with `chmod 600` instead of warning only ([#573](https://github.com/mvanhorn/last30days-skill/issues/573))
 
 ## [3.5.0] - 2026-06-18
 
